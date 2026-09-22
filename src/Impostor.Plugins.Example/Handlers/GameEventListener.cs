@@ -1,6 +1,4 @@
 ﻿using Impostor.Api.Events;
-using Impostor.Api.Games;
-using Impostor.Api.Innersloth;
 using Microsoft.Extensions.Logging;
 
 namespace Impostor.Plugins.Example.Handlers
@@ -19,21 +17,16 @@ namespace Impostor.Plugins.Example.Handlers
         {
             _logger.LogInformation("Game creation requested by {client}", e.Client == null ? "a plugin" : e.Client.Name);
 
-            if (e.Client != null)
-            {
-                var gameCode = GameCode.From(e.Client.Name);
-
-                if (!gameCode.IsInvalid)
-                {
-                    e.GameCode = gameCode;
-                }
-
-                if (e.Client.Name == "dima")
-                {
-                    e.IsCancelled = true;
-                    e.Client.DisconnectAsync(DisconnectReason.Custom, "No you dont >:(");
-                }
-            }
+            // TODO: Code below causes the lobby to stop loading and close after 5 secs.
+            // if (e.Client != null)
+            // {
+            //     var gameCode = GameCode.From(e.Client.Name);
+            //
+            //     if (!gameCode.IsInvalid)
+            //     {
+            //         e.GameCode = gameCode;
+            //     }
+            // }
         }
 
         [EventListener]
@@ -57,7 +50,7 @@ namespace Impostor.Plugins.Example.Handlers
             {
                 var info = player.Character!.PlayerInfo;
 
-                _logger.LogInformation("- {player} is {role}", info.PlayerName, info.IsImpostor ? "an impostor" : "a crewmate");
+                _logger.LogInformation("- {player} is {role}", info.PlayerName, info.RoleType);
             }
         }
 
@@ -81,6 +74,16 @@ namespace Impostor.Plugins.Example.Handlers
                 e.Game.Code,
                 e.PreviousHost.Character?.PlayerInfo.PlayerName,
                 e.NewHost != null ? e.NewHost.Character?.PlayerInfo.PlayerName : "none"
+            );
+        }
+
+        [EventListener]
+        public void OnGameOptionsChanged(IGameOptionsChangedEvent e)
+        {
+            _logger.LogInformation(
+                "Game {code} > new options because of {source}",
+                e.Game.Code,
+                e.ChangedBy
             );
         }
 

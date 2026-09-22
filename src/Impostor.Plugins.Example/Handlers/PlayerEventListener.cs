@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Impostor.Api.Events;
 using Impostor.Api.Events.Player;
 using Impostor.Api.Innersloth.Customization;
+using Impostor.Api.Innersloth.GameOptions;
 using Microsoft.Extensions.Logging;
 
 namespace Impostor.Plugins.Example.Handlers
@@ -65,9 +66,13 @@ namespace Impostor.Plugins.Example.Handlers
 
             if (e.Message == "test")
             {
-                e.Game.Options.KillCooldown = 0;
                 e.Game.Options.NumImpostors = 2;
-                e.Game.Options.PlayerSpeedMod = 5;
+
+                if (e.Game.Options is NormalGameOptions normalGameOptions)
+                {
+                    normalGameOptions.KillCooldown = 0;
+                    normalGameOptions.PlayerSpeedMod = 5;
+                }
 
                 await e.Game.SyncSettingsAsync();
             }
@@ -106,19 +111,19 @@ namespace Impostor.Plugins.Example.Handlers
         [EventListener]
         public void OnPlayerEnterVentEvent(IPlayerEnterVentEvent e)
         {
-            _logger.LogInformation("Player {player} entered the vent in {vent}", e.PlayerControl.PlayerInfo.PlayerName, e.Vent.Name);
+            _logger.LogInformation("Player {player} entered the vent in {vent} ({ventId})", e.PlayerControl.PlayerInfo.PlayerName, e.Vent.Name, e.Vent.Id);
         }
 
         [EventListener]
         public void OnPlayerExitVentEvent(IPlayerExitVentEvent e)
         {
-            _logger.LogInformation("Player {player} exited the vent in {vent}", e.PlayerControl.PlayerInfo.PlayerName, e.Vent.Name);
+            _logger.LogInformation("Player {player} exited the vent in {vent} ({ventId})", e.PlayerControl.PlayerInfo.PlayerName, e.Vent.Name, e.Vent.Id);
         }
 
         [EventListener]
         public void OnPlayerVentEvent(IPlayerVentEvent e)
         {
-            _logger.LogInformation("Player {player} vented to {vent}", e.PlayerControl.PlayerInfo.PlayerName, e.NewVent.Name);
+            _logger.LogInformation("Player {player} vented to {vent} ({ventId})", e.PlayerControl.PlayerInfo.PlayerName, e.NewVent.Name, e.NewVent.Id);
         }
 
         [EventListener]

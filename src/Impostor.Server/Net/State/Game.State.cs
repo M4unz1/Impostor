@@ -1,9 +1,8 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Threading.Tasks;
 using Impostor.Api;
 using Impostor.Api.Innersloth;
 using Impostor.Api.Net;
-using Impostor.Api.Net.Messages;
 using Impostor.Hazel;
 using Impostor.Server.Events;
 using Impostor.Server.Net.Hazel;
@@ -77,14 +76,23 @@ namespace Impostor.Server.Net.State
             // Player can refuse to be kicked and keep the connection open, check for this.
             _ = Task.Run(async () =>
             {
-                await Task.Delay(Constants.ConnectionTimeout);
+                await Task.Delay(_timeoutConfig.ConnectionTimeout);
 
                 if (player.Client.Connection.IsConnected && player.Client.Connection is HazelConnection hazel)
                 {
                     _logger.LogInformation("{0} - Player {1} ({2}) kept connection open after leaving, disposing.", Code, player.Client.Name, playerId);
-                    hazel.DisposeInnerConnection();
+                    await player.Client.DisconnectAsync(isBan ? DisconnectReason.Banned : DisconnectReason.Kicked);
                 }
             });
+
+            // Clean up the PlayerInfo if we own it and we're still in the lobby
+            if (GameState == GameStates.NotStarted)
+            {
+                if (GameNet.GameData.PlayersByClientId.TryGetValue(playerId, out var playerInfo))
+                {
+                    await DespawnPlayerInfoAsync(playerInfo);
+                }
+            }
 
             return true;
         }

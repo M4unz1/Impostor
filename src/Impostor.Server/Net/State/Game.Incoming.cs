@@ -1,10 +1,10 @@
-﻿using System;
+using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Impostor.Api.Games;
 using Impostor.Api.Innersloth;
 using Impostor.Api.Net;
-using Impostor.Api.Net.Messages;
 using Impostor.Hazel;
 using Impostor.Server.Events;
 using Microsoft.Extensions.DependencyInjection;
@@ -42,6 +42,12 @@ namespace Impostor.Server.Net.State
             foreach (var player in _players)
             {
                 player.Value.Limbo = LimboStates.PreSpawn;
+            }
+
+            // Delete all PlayerInfo objects
+            foreach (var playerInfo in GameNet.GameData.Players.Values.ToArray())
+            {
+                await DespawnPlayerInfoAsync(playerInfo);
             }
 
             await _eventManager.CallAsync(new GameEndedEvent(this, gameOverReason));
@@ -157,22 +163,11 @@ namespace Impostor.Server.Net.State
             if (_compatibilityConfig.AllowVersionMixing == false &&
                 this.Host != null && client.GameVersion != this.Host.Client.GameVersion)
             {
-                if (client.GameVersion < this.Host.Client.GameVersion)
+                var versionCheckResult = _compatibilityManager.CanJoinGame(Host.Client.GameVersion, client.GameVersion);
+                if (versionCheckResult != GameJoinError.None)
                 {
-                    return GameJoinResult.FromError(GameJoinError.ClientOutdated);
+                    return GameJoinResult.FromError(versionCheckResult);
                 }
-                else
-                {
-                    return GameJoinResult.FromError(GameJoinError.ClientTooNew);
-                }
-            }
-
-            // Check if;
-            // - The player is already in this game.
-            // - The game is full.
-            if (player?.Game != this && _players.Count >= Options.MaxPlayers)
-            {
-                return GameJoinResult.FromError(GameJoinError.GameFull);
             }
 
             if (GameState == GameStates.Starting || GameState == GameStates.Started)
@@ -185,11 +180,19 @@ namespace Impostor.Server.Net.State
                 return GameJoinResult.FromError(GameJoinError.GameDestroyed);
             }
 
+            // Check if;
+            // - The player is already in this game.
+            // - The game is full.
+            if (player?.Game != this && _players.Count >= Options.MaxPlayers)
+            {
+                return GameJoinResult.FromError(GameJoinError.GameFull);
+            }
+
             var isNew = false;
 
             if (player == null || player.Game != this)
             {
-                var clientPlayer = new ClientPlayer(_serviceProvider.GetRequiredService<ILogger<ClientPlayer>>(), client, this);
+                var clientPlayer = new ClientPlayer(_serviceProvider.GetRequiredService<ILogger<ClientPlayer>>(), client, this, _timeoutConfig.SpawnTimeout);
 
                 if (!_clientManager.Validate(client))
                 {
@@ -207,18 +210,18 @@ namespace Impostor.Server.Net.State
                 return GameJoinResult.FromError(GameJoinError.InvalidLimbo);
             }
 
-            if (GameState == GameStates.Ended)
-            {
-                await HandleJoinGameNext(player, isNew);
-                return GameJoinResult.CreateSuccess(player);
-            }
-
             var @event = new GamePlayerJoiningEvent(this, player);
             await _eventManager.CallAsync(@event);
 
             if (@event.JoinResult != null && !@event.JoinResult.Value.IsSuccess)
             {
                 return @event.JoinResult.Value;
+            }
+
+            if (GameState == GameStates.Ended)
+            {
+                await HandleJoinGameNext(player, isNew);
+                return GameJoinResult.CreateSuccess(player);
             }
 
             await HandleJoinGameNew(player, isNew);

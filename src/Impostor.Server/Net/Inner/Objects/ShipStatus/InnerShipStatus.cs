@@ -10,7 +10,6 @@ using Impostor.Api.Net;
 using Impostor.Api.Net.Custom;
 using Impostor.Api.Net.Inner;
 using Impostor.Api.Net.Inner.Objects.ShipStatus;
-using Impostor.Api.Net.Messages;
 using Impostor.Api.Net.Messages.Rpcs;
 using Impostor.Server.Net.Inner.Objects.Systems;
 using Impostor.Server.Net.Inner.Objects.Systems.ShipStatus;
@@ -22,20 +21,20 @@ namespace Impostor.Server.Net.Inner.Objects.ShipStatus
     {
         private readonly Dictionary<SystemTypes, ISystemType> _systems = new Dictionary<SystemTypes, ISystemType>();
 
-        protected InnerShipStatus(ICustomMessageManager<ICustomRpc> customMessageManager, Game game) : base(customMessageManager, game)
+        protected InnerShipStatus(ICustomMessageManager<ICustomRpc> customMessageManager, Game game, MapTypes mapType) : base(customMessageManager, game)
         {
             Components.Add(this);
+
+            MapType = mapType;
+            Data = MapData.Maps[mapType];
+            Doors = new Dictionary<int, bool>(Data.Doors.Count);
         }
 
-        public abstract IMapData Data { get; }
+        public MapTypes MapType { get; }
 
-        public abstract Dictionary<int, bool> Doors { get; }
+        public MapData Data { get; }
 
-        public abstract float SpawnRadius { get; }
-
-        public abstract Vector2 InitialSpawnCenter { get; }
-
-        public abstract Vector2 MeetingSpawnCenter { get; }
+        public Dictionary<int, bool> Doors { get; }
 
         internal override ValueTask OnSpawnAsync()
         {
@@ -75,16 +74,12 @@ namespace Impostor.Server.Net.Inner.Objects.ShipStatus
 
         public override async ValueTask<bool> HandleRpcAsync(ClientPlayer sender, ClientPlayer? target, RpcCalls call, IMessageReader reader)
         {
-            if (!await ValidateCmd(call, sender, target))
-            {
-                return false;
-            }
-
             switch (call)
             {
                 case RpcCalls.CloseDoorsOfType:
                 {
-                    if (!await ValidateImpostor(call, sender, sender.Character!.PlayerInfo))
+                    if (!await ValidateCmd(call, sender, target) ||
+                        !await ValidateImpostor(call, sender, sender.Character!.PlayerInfo))
                     {
                         return false;
                     }
@@ -93,21 +88,15 @@ namespace Impostor.Server.Net.Inner.Objects.ShipStatus
                     break;
                 }
 
-                case RpcCalls.RepairSystem:
+                case RpcCalls.UpdateSystem:
                 {
-                    Rpc28RepairSystem.Deserialize(reader, Game, out var systemType, out var player, out var amount);
-
-                    if (systemType == SystemTypes.Sabotage && !await ValidateImpostor(call, sender, sender.Character!.PlayerInfo))
+                    if (!await ValidateCmd(call, sender, target))
                     {
                         return false;
                     }
 
-                    break;
-                }
-
-                case RpcCalls.UpdateSystem:
-                {
-                    Rpc35UpdateSystem.Deserialize(reader, Game, out var systemType, out var playerControl, out var sequenceId, out var state, out var ventId);
+                    // TODO: properly deserialize this RPC
+                    // Rpc35UpdateSystem.Deserialize(reader, Game, out var systemType, out var playerControl, out var sequenceId, out var state, out var ventId);
                     break;
                 }
 
@@ -122,8 +111,8 @@ namespace Impostor.Server.Net.Inner.Objects.ShipStatus
         {
             var vector = new Vector2(0, 1);
             vector = Rotate(vector, (player.PlayerId - 1) * (360f / numPlayers));
-            vector *= this.SpawnRadius;
-            return (initialSpawn ? this.InitialSpawnCenter : this.MeetingSpawnCenter) + vector + new Vector2(0f, 0.3636f);
+            vector *= Data.SpawnRadius;
+            return (initialSpawn ? Data.InitialSpawnCenter : Data.MeetingSpawnCenter) + vector + new Vector2(0f, 0.3636f);
         }
 
         protected virtual void AddSystems(Dictionary<SystemTypes, ISystemType> systems)

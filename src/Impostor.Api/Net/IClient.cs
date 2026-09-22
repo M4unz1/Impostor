@@ -1,14 +1,14 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Impostor.Api.Innersloth;
-using Impostor.Api.Net.Messages;
 
 namespace Impostor.Api.Net
 {
     /// <summary>
     ///     Represents a connected game client.
     /// </summary>
-    public interface IClient
+    public interface IClient : IEquatable<IClient>
     {
         /// <summary>
         ///     Gets or sets the unique ID of the client.
@@ -68,13 +68,16 @@ namespace Impostor.Api.Net
         /// <summary>
         /// Gets the version of the game the client is using.
         /// </summary>
-        int GameVersion { get; }
+        GameVersion GameVersion { get; }
 
         /// <summary>
         /// Gets platform specific data of the <see cref="IClient" />.
         /// </summary>
         PlatformSpecificData PlatformSpecificData { get; }
 
+        ValueTask<bool> ReportCheatAsync(CheatContext context, CheatCategory category, string message);
+
+        [Obsolete("Please use the overload that adds a cheat category")]
         ValueTask<bool> ReportCheatAsync(CheatContext context, string message);
 
         ValueTask HandleMessageAsync(IMessageReader message, MessageType messageType);

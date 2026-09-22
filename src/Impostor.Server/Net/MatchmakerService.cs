@@ -1,4 +1,5 @@
-﻿using System.Net;
+using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Impostor.Api.Config;
@@ -12,18 +13,18 @@ namespace Impostor.Server.Net
     {
         private readonly ILogger<MatchmakerService> _logger;
         private readonly ServerConfig _serverConfig;
-        private readonly ServerRedirectorConfig _redirectorConfig;
+        private readonly HttpServerConfig _httpServerConfig;
         private readonly Matchmaker _matchmaker;
 
         public MatchmakerService(
             ILogger<MatchmakerService> logger,
             IOptions<ServerConfig> serverConfig,
-            IOptions<ServerRedirectorConfig> redirectorConfig,
+            IOptions<HttpServerConfig> httpServerConfig,
             Matchmaker matchmaker)
         {
             _logger = logger;
             _serverConfig = serverConfig.Value;
-            _redirectorConfig = redirectorConfig.Value;
+            _httpServerConfig = httpServerConfig.Value;
             _matchmaker = matchmaker;
         }
 
@@ -40,11 +41,18 @@ namespace Impostor.Server.Net
                 _serverConfig.ResolvePublicIp(),
                 _serverConfig.PublicPort);
 
-            if (_redirectorConfig.Enabled)
+            var runningOutsideContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == null;
+            if (_serverConfig.PublicIp == "127.0.0.1")
             {
-                _logger.LogWarning(_redirectorConfig.Master
-                    ? "Server redirection is enabled as master, this instance will redirect clients to other nodes."
-                    : "Server redirection is enabled as node, this instance will accept clients.");
+                // NOTE: If this warning annoys you, set your PublicIp to "localhost"
+                _logger.LogError("Your PublicIp is set to the default value of 127.0.0.1.");
+                _logger.LogError("To allow people on other devices to connect to your server, change this value to your Public IP address");
+                _logger.LogError("For more info on how to do this see https://github.com/Impostor/Impostor/blob/master/docs/Server-configuration.md");
+            }
+            else if (_httpServerConfig.ListenIp == "0.0.0.0" && runningOutsideContainer)
+            {
+                _logger.LogWarning("Since Among Us 16.0.5 it is required to support HTTPS for players to connect, we recommend setting up a reverse proxy:");
+                _logger.LogWarning("See https://github.com/Impostor/Impostor/blob/master/docs/Http-server.md for instructions");
             }
         }
 

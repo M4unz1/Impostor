@@ -1,18 +1,21 @@
-﻿using System.IO;
-using System.Net;
+﻿using System.Net;
 using System.Threading.Tasks;
 using Impostor.Api;
 using Impostor.Api.Games;
-using Impostor.Api.Innersloth;
 using Impostor.Api.Net;
 using Impostor.Api.Net.Inner;
 using Impostor.Api.Net.Messages;
 using Impostor.Hazel;
+using Impostor.Server.Events;
+using Impostor.Server.Net.Inner;
+using Microsoft.Extensions.Logging;
 
 namespace Impostor.Server.Net.State
 {
     internal partial class Game : IGame
     {
+        private bool _alreadyCallingOptionsChangedEvent = false;
+
         IClientPlayer? IGame.Host => Host;
 
         IGameNet IGame.GameNet => GameNet;
@@ -26,23 +29,60 @@ namespace Impostor.Server.Net.State
         {
             if (Host?.Character == null)
             {
-                throw new ImpostorException("Attempted to set infected when the host was not spawned.");
+                throw new ImpostorException("Attempted to change settings when the host was not spawned.");
             }
 
-            using (var writer = StartRpc(Host.Character.NetId, RpcCalls.SyncSettings))
+            if (GameNet.GameManager == null)
             {
-                // Someone will probably forget to do this, so we include it here.
-                // If this is not done, the host will overwrite changes later with the defaults.
-                Options.IsDefaults = false;
+                throw new ImpostorException("Attempted to change options when the game manager was not spawned.");
+            }
 
-                await using (var memory = new MemoryStream())
-                await using (var writerBin = new BinaryWriter(memory))
+            var gameOptionsTag = GameNet.GameManager.GetGameLogicTag(GameNet.GameManager.LogicOptions);
+            if (gameOptionsTag == -1)
+            {
+                throw new ImpostorException("Attempted to change options when the LogicOptions was not spawned.");
+            }
+
+            // Someone will probably forget to do this, so we include it here.
+            // If this is not done, the host will overwrite changes later with the defaults.
+            Options.IsDefaults = false;
+
+            using var writer = MessageWriter.Get(MessageType.Reliable);
+
+            writer.StartMessage(MessageFlags.GameData);
+            Code.Serialize(writer);
+
+            writer.StartMessage(GameDataTag.DataFlag);
+            writer.WritePacked(GameNet.GameManager.NetId);
+
+            writer.StartMessage((byte)gameOptionsTag);
+            await GameNet.GameManager.LogicOptions.SerializeAsync(writer, false);
+
+            writer.EndMessage();
+            writer.EndMessage();
+            writer.EndMessage();
+
+            await SendToAllAsync(writer);
+
+            // Prevent bad plugins from causing a server crash by recursing into this function
+            if (_alreadyCallingOptionsChangedEvent)
+            {
+                _logger.LogError("Plugin called SyncSettingsAsync while processing a GameOptionsChangedEvent, aborting to prevent recursion");
+            }
+            else
+            {
+                try
                 {
-                    Options.Serialize(writerBin, GameOptionsData.LatestVersion);
-                    writer.WriteBytesAndSize(memory.ToArray());
+                    _alreadyCallingOptionsChangedEvent = true;
+                    await _eventManager.CallAsync(new GameOptionsChangedEvent(
+                        this,
+                        Api.Events.IGameOptionsChangedEvent.ChangeReason.Api
+                    ));
                 }
-
-                await FinishRpcAsync(writer);
+                finally
+                {
+                    _alreadyCallingOptionsChangedEvent = false;
+                }
             }
         }
 

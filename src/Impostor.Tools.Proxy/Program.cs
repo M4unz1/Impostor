@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Impostor.Api.Net.Messages;
+using Impostor.Hazel.Abstractions;
 using Impostor.Hazel;
 using Impostor.Hazel.Extensions;
 using Impostor.Hazel.Udp;
@@ -34,6 +34,7 @@ namespace Impostor.Tools.Proxy
             { 13, "Redirect" },
             { 14, "ReselectServer" },
             { 16, "GetGameListV2" },
+            { 26, "PackedGameDataTo" },
         };
 
         private static IServiceProvider _serviceProvider;

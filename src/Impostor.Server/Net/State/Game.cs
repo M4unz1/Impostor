@@ -4,14 +4,16 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net;
-using System.Numerics;
 using System.Threading.Tasks;
 using Impostor.Api.Config;
 using Impostor.Api.Events.Managers;
 using Impostor.Api.Games;
 using Impostor.Api.Innersloth;
+using Impostor.Api.Innersloth.Customization;
+using Impostor.Api.Innersloth.GameOptions;
 using Impostor.Api.Net;
-using Impostor.Api.Net.Messages;
+using Impostor.Api.Net.Inner.Objects;
+using Impostor.Api.Net.Manager;
 using Impostor.Api.Net.Messages.S2C;
 using Impostor.Server.Events;
 using Impostor.Server.Net.Manager;
@@ -29,7 +31,9 @@ namespace Impostor.Server.Net.State
         private readonly ConcurrentDictionary<int, ClientPlayer> _players;
         private readonly HashSet<IPAddress> _bannedIps;
         private readonly IEventManager _eventManager;
+        private readonly ICompatibilityManager _compatibilityManager;
         private readonly CompatibilityConfig _compatibilityConfig;
+        private readonly TimeoutConfig _timeoutConfig;
 
         public Game(
             ILogger<Game> logger,
@@ -37,10 +41,14 @@ namespace Impostor.Server.Net.State
             GameManager gameManager,
             IPEndPoint publicIp,
             GameCode code,
-            GameOptionsData options,
+            IGameOptions options,
+            GameFilterOptions filterOptions,
             ClientManager clientManager,
             IEventManager eventManager,
-            IOptions<CompatibilityConfig> compatibilityConfig)
+            ICompatibilityManager compatibilityManager,
+            IOptions<CompatibilityConfig> compatibilityConfig,
+            IOptions<TimeoutConfig> timeoutConfig,
+            Guid? modGuid = null)
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
@@ -54,9 +62,13 @@ namespace Impostor.Server.Net.State
             GameState = GameStates.NotStarted;
             GameNet = new GameNet();
             Options = options;
+            FilterOptions = filterOptions;
+            ModGuid = modGuid;
             _clientManager = clientManager;
             _eventManager = eventManager;
+            _compatibilityManager = compatibilityManager;
             _compatibilityConfig = compatibilityConfig.Value;
+            _timeoutConfig = timeoutConfig.Value;
             Items = new ConcurrentDictionary<object, object>();
         }
 
@@ -72,7 +84,9 @@ namespace Impostor.Server.Net.State
 
         public GameStates GameState { get; private set; }
 
-        public GameOptionsData Options { get; }
+        public IGameOptions Options { get; }
+
+        public GameFilterOptions FilterOptions { get; }
 
         public IDictionary<object, object> Items { get; }
 
@@ -81,6 +95,10 @@ namespace Impostor.Server.Net.State
         public ClientPlayer? Host => _players.GetValueOrDefault(HostId);
 
         public IEnumerable<IClientPlayer> Players => _players.Select(p => p.Value);
+
+        public bool IsHostAuthoritive => Host != null && Host.Client.GameVersion.HasDisableServerAuthorityFlag;
+
+        public Guid? ModGuid { get; }
 
         internal GameNet GameNet { get; }
 
@@ -107,11 +125,9 @@ namespace Impostor.Server.Net.State
             {
                 foreach (var player in _players.Values)
                 {
-                    player.Character?.NetworkTransform.OnPlayerSpawn();
-
                     if (GameNet.ShipStatus != null)
                     {
-                        await player.Character!.NetworkTransform.SetPositionAsync(player, GameNet.ShipStatus.GetSpawnLocation(player.Character, PlayerCount, true), Vector2.Zero);
+                        await player.Character!.NetworkTransform.SetPositionAsync(player, GameNet.ShipStatus.GetSpawnLocation(player.Character, PlayerCount, true));
                     }
                 }
 
@@ -119,6 +135,18 @@ namespace Impostor.Server.Net.State
 
                 await _eventManager.CallAsync(new GameStartedEvent(this));
             }
+        }
+
+        /// <summary>Check if there are players using a color.</summary>
+        /// <param name="color">The color to check for.</param>
+        /// <param name="exceptBy">Exempt a player from being checked.</param>
+        /// <returns>True if there is player other than exceptBy that uses that color.</returns>
+        internal bool IsColorUsed(ColorType color, IInnerPlayerControl? exceptBy = null)
+        {
+            return Players.Any(p => p.Character != null &&
+                               p.Character != exceptBy &&
+                               p.Character.PlayerInfo != null &&
+                               p.Character.PlayerInfo.CurrentOutfit.Color == color);
         }
 
         private ValueTask BroadcastJoinMessage(IMessageWriter message, bool clear, ClientPlayer player)

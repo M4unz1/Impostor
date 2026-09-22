@@ -1,4 +1,8 @@
-﻿namespace Impostor.Api.Net.Messages
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+
+namespace Impostor.Api.Net.Messages
 {
     public static class MessageFlags
     {
@@ -24,5 +28,28 @@
         public const byte SetActivePodType = 21;
         public const byte QueryPlatformIds = 22;
         public const byte QueryLobbyInfo = 23;
+        public const byte EndGameHostMigration = 24;
+        public const byte HostModdedGame = 25;
+        public const byte PackedGameDataTo = 26;
+
+        private static readonly Dictionary<byte, string> FlagCache;
+
+        static MessageFlags()
+        {
+            FlagCache = typeof(MessageFlags)
+                .GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Where(fi => fi.IsLiteral && !fi.IsInitOnly)
+                .ToDictionary(x => (byte)x.GetValue(null)!, y => y.Name);
+        }
+
+        /// <summary>
+        /// Convert a MessageFlag to the corresponding string.
+        /// </summary>
+        /// <param name="flag">The MessageFlag to convert.</param>
+        /// <returns>A string corresponding with the value of flag.</returns>
+        public static string FlagToString(byte flag)
+        {
+            return FlagCache.TryGetValue(flag, out var res) ? res : $"Unknown Flag {flag}";
+        }
     }
 }

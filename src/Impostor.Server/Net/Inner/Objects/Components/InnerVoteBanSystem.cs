@@ -6,7 +6,6 @@ using Impostor.Api.Net;
 using Impostor.Api.Net.Custom;
 using Impostor.Api.Net.Inner;
 using Impostor.Api.Net.Inner.Objects;
-using Impostor.Api.Net.Messages;
 using Impostor.Api.Net.Messages.Rpcs;
 using Impostor.Server.Net.State;
 using Microsoft.Extensions.Logging;
@@ -22,6 +21,7 @@ namespace Impostor.Server.Net.Inner.Objects.Components
         {
             _logger = logger;
             _votes = new Dictionary<int, int[]>();
+            Components.Add(this);
         }
 
         public override ValueTask<bool> SerializeAsync(IMessageWriter writer, bool initialState)
@@ -70,7 +70,7 @@ namespace Impostor.Server.Net.Inner.Objects.Components
 
                 if (clientId != sender.Client.Id)
                 {
-                    if (await sender.Client.ReportCheatAsync(RpcCalls.AddVote, $"Client sent {nameof(RpcCalls.AddVote)} as other client"))
+                    if (await sender.Client.ReportCheatAsync(RpcCalls.AddVote, CheatCategory.Ownership, $"Client sent {nameof(RpcCalls.AddVote)} as other client"))
                     {
                         return false;
                     }

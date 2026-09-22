@@ -1,10 +1,10 @@
 using System;
 using System.Threading.Tasks;
+using Impostor.Api;
 using Impostor.Api.Events.Managers;
 using Impostor.Api.Net;
 using Impostor.Api.Net.Custom;
 using Impostor.Api.Net.Inner;
-using Impostor.Api.Net.Messages;
 using Impostor.Api.Net.Messages.Rpcs;
 using Impostor.Server.Events.Player;
 using Impostor.Server.Net.State;
@@ -37,17 +37,13 @@ namespace Impostor.Server.Net.Inner.Objects.Components
 
         public override async ValueTask<bool> HandleRpcAsync(ClientPlayer sender, ClientPlayer? target, RpcCalls call, IMessageReader reader)
         {
-            if (call != RpcCalls.BootFromVent && !await ValidateOwnership(call, sender))
-            {
-                return false;
-            }
-
             switch (call)
             {
                 case RpcCalls.EnterVent:
                 case RpcCalls.ExitVent:
                 {
-                    if (!await ValidateCanVent(call, sender, _playerControl.PlayerInfo))
+                    if (!await ValidateOwnership(call, sender) ||
+                        !await ValidateCanVent(call, sender, _playerControl.PlayerInfo))
                     {
                         return false;
                     }
@@ -68,7 +64,7 @@ namespace Impostor.Server.Net.Inner.Objects.Components
 
                     if (Game.GameNet.ShipStatus == null)
                     {
-                        if (await sender.Client.ReportCheatAsync(call, "Client interacted with vent on unknown map"))
+                        if (await sender.Client.ReportCheatAsync(call, CheatCategory.ProtocolExtension, "Client interacted with vent on unknown map"))
                         {
                             return false;
                         }
@@ -78,7 +74,7 @@ namespace Impostor.Server.Net.Inner.Objects.Components
 
                     if (!Game.GameNet.ShipStatus.Data.Vents.TryGetValue(ventId, out var vent))
                     {
-                        if (await sender.Client.ReportCheatAsync(call, "Client interacted with nonexistent vent"))
+                        if (await sender.Client.ReportCheatAsync(call, CheatCategory.ProtocolExtension, "Client interacted with nonexistent vent"))
                         {
                             return false;
                         }
@@ -106,8 +102,37 @@ namespace Impostor.Server.Net.Inner.Objects.Components
                 }
 
                 case RpcCalls.ClimbLadder:
+                {
+                    if (!await ValidateOwnership(call, sender))
+                    {
+                        return false;
+                    }
+
                     Rpc31ClimbLadder.Deserialize(reader, out var ladderId, out var lastClimbLadderSid);
                     break;
+                }
+
+                case RpcCalls.Pet:
+                {
+                    if (!await ValidateOwnership(call, sender))
+                    {
+                        return false;
+                    }
+
+                    Rpc49Pet.Deserialize(reader, out var position, out var petPosition);
+                    break;
+                }
+
+                case RpcCalls.CancelPet:
+                {
+                    if (!await ValidateOwnership(call, sender))
+                    {
+                        return false;
+                    }
+
+                    Rpc50CancelPet.Deserialize(reader);
+                    break;
+                }
 
                 default:
                     return await base.HandleRpcAsync(sender, target, call, reader);

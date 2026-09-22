@@ -1,25 +1,40 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using Impostor.Api.Events.Managers;
 using Impostor.Api.Games;
 using Impostor.Api.Innersloth;
 using Impostor.Api.Innersloth.Customization;
-using Impostor.Api.Net.Messages;
+using Impostor.Api.Innersloth.GameOptions;
+using Impostor.Api.Net;
+using Impostor.Api.Net.Custom;
+using Impostor.Api.Net.Inner;
+using Impostor.Api.Net.Messages.Rpcs;
 using Impostor.Api.Utils;
+using Impostor.Server.Net.State;
+using Microsoft.Extensions.Logging;
 
 namespace Impostor.Server.Net.Inner.Objects
 {
     internal partial class InnerPlayerInfo
     {
-        public InnerPlayerInfo(byte playerId)
+        private readonly IEventManager _eventManager;
+        private readonly ILogger<InnerPlayerInfo> _logger;
+
+        public InnerPlayerInfo(ICustomMessageManager<ICustomRpc> customMessageManager, IEventManager eventManager, Game game, ILogger<InnerPlayerInfo> logger) : base(customMessageManager, game)
         {
-            PlayerId = playerId;
+            Components.Add(this);
+            _eventManager = eventManager;
+            _logger = logger;
         }
 
         public InnerPlayerControl? Controller { get; internal set; }
 
-        public byte PlayerId { get; }
+        public byte PlayerId { get; internal set; }
 
-        public string PlayerName { get; internal set; } = string.Empty;
+        public int ClientId { get; internal set; }
+
+        public string PlayerName => CurrentOutfit.PlayerName;
 
         public Dictionary<PlayerOutfitType, PlayerOutfit> Outfits { get; } = new()
         {
@@ -30,19 +45,21 @@ namespace Impostor.Server.Net.Inner.Objects
 
         public PlayerOutfit CurrentOutfit => Outfits[CurrentOutfitType];
 
-        public RoleTypes RoleType { get; internal set; }
+        public RoleTypes? RoleType { get; internal set; }
+
+        public RoleTypes? RoleWhenAlive { get; internal set; }
 
         public bool Disconnected { get; internal set; }
 
-        public bool IsImpostor => RoleType is RoleTypes.Impostor or RoleTypes.Shapeshifter;
+        public bool IsImpostor => RoleType is RoleTypes.Impostor or RoleTypes.Shapeshifter or RoleTypes.ImpostorGhost or RoleTypes.Phantom or RoleTypes.Viper;
 
-        public bool CanVent => RoleType is RoleTypes.Impostor or RoleTypes.Shapeshifter or RoleTypes.Engineer;
+        public bool CanVent => RoleType is RoleTypes.Impostor or RoleTypes.Shapeshifter or RoleTypes.Phantom or RoleTypes.Viper or RoleTypes.Engineer;
 
         public bool IsDead { get; internal set; }
 
         public DeathReason LastDeathReason { get; internal set; }
 
-        public List<InnerGameData.TaskInfo> Tasks { get; internal set; } = new List<InnerGameData.TaskInfo>(0);
+        public List<TaskInfo> Tasks { get; internal set; } = new List<TaskInfo>(0);
 
         public DateTimeOffset LastMurder { get; set; }
 
@@ -60,16 +77,67 @@ namespace Impostor.Server.Net.Inner.Objects
             // the impostor has a cooldown of half the usual duration. As a workaround we always assume the kill was
             // prevented and the impostor only has half of its cooldown.
             // FIXME when the base game improved their implementation.
-            return dateTimeProvider.UtcNow.Subtract(LastMurder).TotalSeconds >= game.Options.KillCooldown / 2;
+            if (game.Options.GameMode is GameModes.Normal or GameModes.NormalFools)
+            {
+                var options = (NormalGameOptions)game.Options;
+                return dateTimeProvider.UtcNow.Subtract(LastMurder).TotalSeconds >= options.KillCooldown / 2;
+            }
+            else
+            {
+                return true;
+            }
         }
 
-        public void Serialize(IMessageWriter writer)
+        public override ValueTask<bool> SerializeAsync(IMessageWriter writer, bool initialState)
         {
-            throw new NotImplementedException();
+            writer.Write(PlayerId);
+            writer.WritePacked(ClientId);
+
+            writer.Write((byte)Outfits.Count);
+            foreach (var outfit in Outfits)
+            {
+                writer.Write((byte)outfit.Key);
+                outfit.Value.Serialize(writer);
+            }
+
+            writer.WritePacked(PlayerLevel);
+
+            var flag = 0;
+            if (Disconnected)
+            {
+                flag = (byte)(flag | 1u);
+            }
+
+            if (IsDead)
+            {
+                flag = (byte)(flag | 4u);
+            }
+
+            writer.Write((byte)flag);
+
+            writer.Write((ushort)(RoleType ?? 0));
+            writer.Write(RoleWhenAlive.HasValue);
+            if (RoleWhenAlive.HasValue)
+            {
+                writer.Write((ushort)RoleWhenAlive.Value);
+            }
+
+            writer.Write((byte)Tasks.Count);
+            for (var i = 0; i < Tasks.Count; i++)
+            {
+                Tasks[i].Serialize(writer);
+            }
+
+            writer.Write(string.Empty); // FriendCode
+            writer.Write(string.Empty); // PUID
+            return new ValueTask<bool>(true);
         }
 
-        public void Deserialize(IMessageReader reader)
+        public override ValueTask DeserializeAsync(IClientPlayer sender, IClientPlayer? target, IMessageReader reader, bool initialState)
         {
+            PlayerId = reader.ReadByte();
+            ClientId = reader.ReadPackedInt32();
+
             Outfits.Clear();
             var b = reader.ReadByte();
             for (var i = 0; i < b; i++)
@@ -85,8 +153,15 @@ namespace Impostor.Server.Net.Inner.Objects
             Disconnected = (flag & 1) != 0;
             IsDead = (flag & 4) != 0;
 
-            var roleType = (RoleTypes)reader.ReadUInt16();
-            RoleType = roleType;
+            // Ignore the RoleType here and only trust the SetRole RPC, as
+            // RoleType is not nullable in vanilla, while Impostor checks game
+            // starts based on assigned roles.
+            _ = (RoleTypes)reader.ReadUInt16();
+
+            if (reader.ReadBoolean())
+            {
+                RoleWhenAlive = (RoleTypes)reader.ReadUInt16();
+            }
 
             var taskCount = reader.ReadByte();
 
@@ -99,6 +174,87 @@ namespace Impostor.Server.Net.Inner.Objects
             {
                 Tasks[i].Deserialize(reader);
             }
+
+            // Impostor doesn't expose fields that aren't properly validated
+            reader.ReadString(); // FriendCode
+            reader.ReadString(); // PUID
+
+            return ValueTask.CompletedTask;
+        }
+
+        public override async ValueTask<bool> HandleRpcAsync(ClientPlayer sender, ClientPlayer? target, RpcCalls call, IMessageReader reader)
+        {
+            switch (call)
+            {
+                case RpcCalls.SetTasks:
+                    Rpc29SetTasks.Deserialize(reader, out var taskTypeIds);
+                    SetTasks(taskTypeIds);
+                    break;
+
+                default:
+                    return await base.HandleRpcAsync(sender, target, call, reader);
+            }
+
+            return true;
+        }
+
+        private void SetTasks(ReadOnlyMemory<byte> taskTypeIds)
+        {
+            if (Disconnected)
+            {
+                return;
+            }
+
+            Tasks = new List<TaskInfo>(taskTypeIds.Length);
+
+            var taskId = 0u;
+            foreach (var taskTypeId in taskTypeIds.Span)
+            {
+                var mapTasks = Game.GameNet!.ShipStatus?.Data.Tasks;
+                var taskType = (mapTasks != null && mapTasks.ContainsKey(taskTypeId)) ? mapTasks[taskTypeId] : null;
+                Tasks.Add(new TaskInfo(this, _eventManager, taskId++, taskType));
+            }
+        }
+
+        public byte GetNextRpcSequenceId(RpcCalls rpc)
+        {
+            var defaultOutfit = this.Outfits[PlayerOutfitType.Default];
+
+            byte nextRpcSequenceId = 0;
+            const byte SequenceIdAddition = 5;
+
+            // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+            switch (rpc)
+            {
+                case RpcCalls.SetHatStr:
+                    defaultOutfit.HatSequenceId += SequenceIdAddition;
+                    nextRpcSequenceId = defaultOutfit.HatSequenceId;
+                    break;
+                case RpcCalls.SetSkinStr:
+                    defaultOutfit.SkinSequenceId += SequenceIdAddition;
+                    nextRpcSequenceId = defaultOutfit.SkinSequenceId;
+                    break;
+                case RpcCalls.SetPetStr:
+                    defaultOutfit.PetSequenceId += SequenceIdAddition;
+                    nextRpcSequenceId = defaultOutfit.PetSequenceId;
+                    break;
+                case RpcCalls.SetVisorStr:
+                    defaultOutfit.VisorSequenceId += SequenceIdAddition;
+                    nextRpcSequenceId = defaultOutfit.VisorSequenceId;
+                    break;
+                case RpcCalls.SetNamePlateStr:
+                    defaultOutfit.NamePlateSequenceId += SequenceIdAddition;
+                    nextRpcSequenceId = defaultOutfit.NamePlateSequenceId;
+                    break;
+                default:
+                    _logger.LogError(
+                        "{NextRpcSequenceIdName} was called for an RPC it doesn\'t know how to handle: {Rpc}",
+                        nameof(GetNextRpcSequenceId),
+                        rpc);
+                    break;
+            }
+
+            return nextRpcSequenceId;
         }
     }
 }

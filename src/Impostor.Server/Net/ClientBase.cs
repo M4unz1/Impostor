@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Impostor.Api;
 using Impostor.Api.Innersloth;
+using Impostor.Api.Innersloth.Customization;
 using Impostor.Api.Net;
-using Impostor.Api.Net.Messages;
 using Impostor.Server.Net.State;
 
 namespace Impostor.Server.Net
 {
     internal abstract class ClientBase : IClient
     {
-        protected ClientBase(string name, int gameVersion, Language language, QuickChatModes chatMode, PlatformSpecificData platformSpecificData, IHazelConnection connection)
+        protected ClientBase(string name, GameVersion gameVersion, Language language, QuickChatModes chatMode, PlatformSpecificData platformSpecificData, IHazelConnection connection)
         {
             Name = name;
             GameVersion = gameVersion;
@@ -32,7 +32,7 @@ namespace Impostor.Server.Net
 
         public PlatformSpecificData PlatformSpecificData { get; }
 
-        public int GameVersion { get; }
+        public GameVersion GameVersion { get; }
 
         public IHazelConnection Connection { get; }
 
@@ -40,11 +40,18 @@ namespace Impostor.Server.Net
 
         public ClientPlayer? Player { get; set; }
 
+        public ColorType? PreviousColor { get; set; } = null;
+
         IClientPlayer? IClient.Player => Player;
 
-        public virtual ValueTask<bool> ReportCheatAsync(CheatContext context, string message)
+        public virtual ValueTask<bool> ReportCheatAsync(CheatContext context, CheatCategory category, string message)
         {
             return new ValueTask<bool>(false);
+        }
+
+        public ValueTask<bool> ReportCheatAsync(CheatContext context, string message)
+        {
+            return ReportCheatAsync(context, CheatCategory.Other, message);
         }
 
         public abstract ValueTask HandleMessageAsync(IMessageReader message, MessageType messageType);
@@ -54,6 +61,21 @@ namespace Impostor.Server.Net
         public async ValueTask DisconnectAsync(DisconnectReason reason, string? message = null)
         {
             await Connection.CustomDisconnectAsync(reason, message);
+        }
+
+        public bool Equals(IClient? other)
+        {
+            return other != null && Id == other.Id;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return Equals(obj as ClientBase);
+        }
+
+        public override int GetHashCode()
+        {
+            return Id;
         }
     }
 }

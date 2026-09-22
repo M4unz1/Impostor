@@ -14,9 +14,6 @@
         public const string Destroyed = "The game you tried to join is being destroyed. " +
                                         "Please create a new game.";
 
-        public const string NotImplemented = "Game listing has not been implemented in Impostor yet for servers " +
-                                             "running in server redirection mode.";
-
         public const string UsernameLength = "Your username is too long, please make it shorter.";
 
         public const string UsernameIllegalCharacters = "Your username contains illegal characters, please remove them.";
@@ -26,5 +23,14 @@
         public const string VersionServerTooOld = "Your client is too new, please update your Impostor server to play.";
 
         public const string VersionUnsupported = "Your client version is unsupported, please update your Game and/or Impostor server.";
+
+        private const string UpgradingDocsLink = "https://github.com/Impostor/Impostor/blob/master/docs/Upgrading.md";
+
+        public const string UdpMatchmakingUnsupported = $"""
+                                                        Sorry, UDP Matchmaking is no longer supported.
+                                                        See <link={UpgradingDocsLink}#impostor-190>Impostor documentation</link> on how to migrate to HTTP Matchmaking
+                                                        """;
+
+        public const string HostAuthorityUnsupported = "Your client is requesting host authority, which is not enabled on this Impostor server.";
     }
 }
